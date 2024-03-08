@@ -10,12 +10,7 @@ else:
     # 通常の Python スクリプトとして実行された場合
     dpath = os.path.dirname(sys.argv[0])
     
-#SDXLモデルをダウンロード
-model_dir = os.path.join(dpath, 'models/Stable-diffusion')
-MODEL_ID = "cagliostrolab/animagine-xl-3.0"
-FILES = ["animagine-xl-3.0.safetensors"]
-SUB_DIRS = []
-download_folder(model_dir, MODEL_ID, SUB_DIRS, FILES)      
+
 
 #タガーモデルをダウンロード
 model_dir = os.path.join(dpath, 'models/tagger')
@@ -42,28 +37,38 @@ SUB_DIRS = [
 ]
 download_files_flat(model_dir, MODEL_ID, SUB_DIRS, FILES)
 
+#SDXLモデルをダウンロード
+model_dir = os.path.join(dpath, 'models/Stable-diffusion')
+MODEL_ID = "cagliostrolab/animagine-xl-3.0"
+FILES = ["animagine-xl-3.0.safetensors"]
+SUB_DIRS = []
+download_folder(model_dir, MODEL_ID, SUB_DIRS, FILES)  
 
 # Default arguments
-default_args = ["--nowebui", "--xformers"]
+default_args = ["--nowebui", "--xformers", "--skip-python-version-check", "--skip-torch-cuda-test", "--skip-torch-cuda-test", "--skip-install", "--disable-extra-extensions"]
 
-# Append default arguments if sys.argv is empty
+# Check if custom arguments are provided; if not, append default arguments
 if len(sys.argv) == 1:
     sys.argv.extend(default_args)
-
+else:
+    # 独自の引数がある場合、default_argsの中で未指定の引数のみを追加する
+    # 引数を解析しやすくするため、setを使用
+    provided_args_set = set(sys.argv)
+    for arg in default_args:
+        # "--"で始まるオプションのみを考慮する
+        if arg.startswith("--"):
+            option = arg.split("=")[0] if "=" in arg else arg
+            if option not in provided_args_set:
+                sys.argv.append(arg)
+        else:
+            # "--"で始まらないオプションは直接追加
+            sys.argv.append(arg)
 
 args = launch_utils_Line2Shadow.args
 
 start = launch_utils_Line2Shadow.start
 
 def main():
-    # Assuming 'args' can be directly modified. If not, this approach may need adjustment.
-    # Set default values for nowebui and xformers if not explicitly provided
-    if not hasattr(args, 'nowebui'):
-        setattr(args, 'nowebui', True)  # Assuming boolean flag for simplicity; adjust as needed
-
-    if not hasattr(args, 'xformers'):
-        setattr(args, 'xformers', True)  # Same assumption as above
-
     start()
 
 if __name__ == "__main__":

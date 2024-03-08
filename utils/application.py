@@ -19,14 +19,13 @@ else:
     # 通常の Python スクリプトとして実行された場合
     dpath = os.path.dirname(sys.argv[0])
 
-
 model = None
 fastapi_url = None
 
 
 def canny_process(image_path, threshold1, threshold2):
-    # 画像を透過チャンネル付きで読み込む
-    img = cv2.imread(image_path, cv2.IMREAD_UNCHANGED)
+    img_pil = Image.open(image_path)
+    img = np.array(img_pil)  # PIL画像をNumPy配列に変換
     
     # アルファチャンネルが存在するか確認
     if img.shape[2] == 4:
@@ -56,6 +55,7 @@ def canny_process(image_path, threshold1, threshold2):
 
 
 def mask_generation(image_path):
+    
     # 画像をRGBAで読み込み、アルファチャンネルを考慮
     img = Image.open(image_path).convert("RGBA")
     img_rgba = img.convert("RGBA")
@@ -207,10 +207,10 @@ class Application(TkinterDnD.Tk):
         self.negative_prompt_entry.pack()
         negative = "nsfw, lowres, bad anatomy, bad hands, text, error, missing fingers, extra digit, fewer digits, cropped, worst quality, low quality, normal quality, jpeg artifacts, signature, watermark, username, blurry, artist name"
         self.negative_prompt_entry.insert(tk.END, negative)
-        self.ai_strength_label = tk.Label(self.image_output_tab, text="AIの強度（0.1-1.0）:")
+        self.ai_strength_label = tk.Label(self.image_output_tab, text="AIの強度（0.35-1.0）:")
         self.ai_strength_label.pack()
         self.ai_strength = tk.DoubleVar(value=1.0)
-        self.ai_strength_slider = tk.Scale(self.image_output_tab, from_=0.1, to=1.0, resolution=0.1, orient=tk.HORIZONTAL, variable=self.ai_strength)
+        self.ai_strength_slider = tk.Scale(self.image_output_tab, from_=0.1, to=1.0, resolution=0.05, orient=tk.HORIZONTAL, variable=self.ai_strength)
         self.ai_strength_slider.pack()
         self.generate_image_button = tk.Button(self.image_output_tab, text="画像生成", command=self.generate_image)
         self.generate_image_button.pack()
@@ -276,9 +276,13 @@ class Application(TkinterDnD.Tk):
     def on_drop(self, event):
         files = self.parse_dropped_files(event.data)
         if files:
-            self.image_path = files[0]
+            try:
+                self.image_path = files[0].encode('utf-8').decode(sys.getfilesystemencoding())
+            except UnicodeEncodeError as e:
+                print(f"Error processing file name: {e}")
+                return
             self.load_image(self.image_path)
-
+        
     def parse_dropped_files(self, data):
         files = data.split()
         return [file.replace('{', '').replace('}', '') for file in files]
@@ -302,9 +306,9 @@ class Application(TkinterDnD.Tk):
         original_size = img.size
         ratio = float(max_size[0]) / max(original_size)
         new_size = tuple([int(x * ratio) for x in original_size])
-        img = img.resize(new_size, Image.Resampling.LANCZOS)
+        photo_img = img.resize(new_size, Image.Resampling.LANCZOS)
 
-        photo = ImageTk.PhotoImage(img)
+        photo = ImageTk.PhotoImage(photo_img)
 
         current_tab = self.tab_control.nametowidget(self.tab_control.select())
 
@@ -361,6 +365,7 @@ class Application(TkinterDnD.Tk):
 
     def clear_canny(self):
         self.clear_processed_image()
+        self.canny_pil = None
 
     def apply_mask(self):
         if self.image_path is None:
@@ -371,6 +376,7 @@ class Application(TkinterDnD.Tk):
 
     def clear_mask(self):
         self.clear_processed_image()
+        self.mask_pil = None
 
     def apply_base(self):
         if self.image_path is None:
@@ -381,6 +387,7 @@ class Application(TkinterDnD.Tk):
 
     def clear_base(self):
         self.clear_processed_image()
+        self.base_pil = None
 
     def generate_image(self):
         output_dir = os.path.join(dpath, "output/")
@@ -394,28 +401,28 @@ class Application(TkinterDnD.Tk):
         prompt = "monochrome, grayscale, " + self.prompt_entry.get("1.0", tk.END).strip()
         nega = self.negative_prompt_entry.get("1.0", tk.END).strip()
         #ai_strengthをself.ai_strength_sliderに変更
-        ai_strength = self.ai_strength_slider.get()
+        ai_strength = float(self.ai_strength_slider.get())
+        
 
         if self.canny_pil is None:
             self.canny_pil = Image.fromarray(cv2.cvtColor(canny_process(self.image_path, 20, 120), cv2.COLOR_GRAY2RGB))
         if self.mask_pil is None:
             self.mask_pil = Image.new("RGB", self.canny_pil.size, (255, 255, 255))
         if self.base_pil is None:
-            self.base_pil = Image.new("RGB", self.canny_pil.size, (180, 180, 180))
-
+            self.base_pil = Image.new("RGB", self.canny_pil.size, (240, 240, 240))
         #self.canny_pil, self.mask_pil, self.base_pilをアスペクト比を保ったまま、長辺が1200になるようにリサイズする
         self.canny_pil = resize_image_aspect_ratio(self.canny_pil, 1200)
-        self.mask_pil = resize_image_aspect_ratio(self.mask_pil, 1200)
-        self.base_pil = resize_image_aspect_ratio(self.base_pil, 1200)
+        #self.canny_pilのサイズに、mask_pilとbase_pilをリサイズする
+        width, height = self.canny_pil.size
+        self.mask_pil = self.mask_pil.resize((width, height), Image.Resampling.LANCZOS)
+        self.base_pil = self.base_pil.resize((width, height), Image.Resampling.LANCZOS)     
         output_pil = create_and_save_images(self.fastapi_url, prompt, nega, self.canny_pil, self.mask_pil, self.base_pil, output_path, ai_strength )
         output_np = np.array(output_pil)
+        base_output_path = os.path.join(output_dir, img_name + "_" + "base" + ".png")
+        self.base_pil.save(base_output_path)
         self.show_processed_image(output_np)
 
 
 def start(fastapi_url):
     app = Application(fastapi_url)
     app.mainloop()
-    
-
-if __name__ == "__main__":
-    start("http://localhost:7861")

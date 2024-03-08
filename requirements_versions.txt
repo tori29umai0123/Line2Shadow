@@ -33,3 +33,4 @@ diffusers==0.25.0
 kinterdnd2==0.3.0
 tensorflow==2.15.0
 pyinstaller
+pygit2

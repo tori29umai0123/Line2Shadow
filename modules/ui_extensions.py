@@ -4,7 +4,7 @@ import threading
 import time
 from datetime import datetime, timezone
 
-import git
+import pygit2
 
 import gradio as gr
 import html
@@ -18,10 +18,8 @@ from modules.call_queue import wrap_gradio_gpu_call
 available_extensions = {"extensions": []}
 STYLE_PRIMARY = ' style="color: var(--primary-400)"'
 
-
 def check_access():
     assert not shared.cmd_opts.disable_extension_access, "extension access disabled because of command line flags"
-
 
 def apply_and_restart(disable_list, update_list, disable_all):
     check_access()
@@ -55,7 +53,6 @@ def apply_and_restart(disable_list, update_list, disable_all):
     else:
         restart.stop_program()
 
-
 def save_config_state(name):
     current_config_state = config_states.get_config()
     if not name:
@@ -70,7 +67,6 @@ def save_config_state(name):
     new_value = next(iter(config_states.all_config_states.keys()), "Current")
     new_choices = ["Current"] + list(config_states.all_config_states.keys())
     return gr.Dropdown.update(value=new_value, choices=new_choices), f"<span>Saved current webui/extension state to \"{filename}\"</span>"
-
 
 def restore_config_state(confirmed, config_state_name, restore_type):
     if config_state_name == "Current":
@@ -94,7 +90,6 @@ def restore_config_state(confirmed, config_state_name, restore_type):
     shared.state.request_restart()
 
     return ""
-
 
 def check_updates(id_task, disable_list):
     check_access()
@@ -120,7 +115,6 @@ def check_updates(id_task, disable_list):
 
     return extension_table(), ""
 
-
 def make_commit_link(commit_hash, remote, text=None):
     if text is None:
         text = commit_hash[:8]
@@ -132,55 +126,46 @@ def make_commit_link(commit_hash, remote, text=None):
     else:
         return text
 
-
 def extension_table():
-    code = f"""<!-- {time.time()} -->
+    code = """<!-- {} -->
     <table id="extensions">
         <thead>
             <tr>
-                <th>
-                    <input class="gr-check-radio gr-checkbox all_extensions_toggle" type="checkbox" {'checked="checked"' if all(ext.enabled for ext in extensions.extensions) else ''} onchange="toggle_all_extensions(event)" />
-                    <abbr title="Use checkbox to enable the extension; it will be enabled or disabled when you click apply button">Extension</abbr>
-                </th>
+                <th>Extension</th>
                 <th>URL</th>
                 <th>Branch</th>
                 <th>Version</th>
                 <th>Date</th>
-                <th><abbr title="Use checkbox to mark the extension for update; it will be updated when you click apply button">Update</abbr></th>
+                <th>Update</th>
             </tr>
         </thead>
         <tbody>
-    """
+    """.format(time.time())
 
     for ext in extensions.extensions:
-        ext: extensions.Extension
-        ext.read_info_from_repo()
+        try:
+            # pygit2を使用してリポジトリ情報を読み取る
+            repo = pygit2.Repository(ext.path)
+            head_commit = repo.head.peel(pygit2.Commit)
+            commit_hash = head_commit.hex
+            commit_date = datetime.fromtimestamp(head_commit.commit_time).strftime('%Y-%m-%d %H:%M:%S')
+            branch_name = repo.head.shorthand
 
-        remote = f"""<a href="{html.escape(ext.remote or '')}" target="_blank">{html.escape("built-in" if ext.is_builtin else ext.remote or '')}</a>"""
+            version_link = make_commit_link(commit_hash, ext.remote, head_commit.message.strip())
 
-        if ext.can_update:
-            ext_status = f"""<label><input class="gr-check-radio gr-checkbox" name="update_{html.escape(ext.name)}" checked="checked" type="checkbox">{html.escape(ext.status)}</label>"""
-        else:
-            ext_status = ext.status
+            code += f"""
+                <tr>
+                    <td><label{STYLE_PRIMARY}><input class="gr-check-radio gr-checkbox extension_toggle" type="checkbox" {'checked="checked"' if ext.enabled else ''}> {html.escape(ext.name)}</label></td>
+                    <td><a href="{html.escape(ext.remote or '')}" target="_blank">{html.escape("built-in" if ext.is_builtin else ext.remote or '')}</a></td>
+                    <td>{html.escape(branch_name)}</td>
+                    <td>{version_link}</td>
+                    <td>{commit_date}</td>
+                    <td>{'Yes' if ext.can_update else 'No'}</td>
+                </tr>
+            """
 
-        style = ""
-        if shared.cmd_opts.disable_extra_extensions and not ext.is_builtin or shared.opts.disable_all_extensions == "extra" and not ext.is_builtin or shared.cmd_opts.disable_all_extensions or shared.opts.disable_all_extensions == "all":
-            style = STYLE_PRIMARY
-
-        version_link = ext.version
-        if ext.commit_hash and ext.remote:
-            version_link = make_commit_link(ext.commit_hash, ext.remote, ext.version)
-
-        code += f"""
-            <tr>
-                <td><label{style}><input class="gr-check-radio gr-checkbox extension_toggle" name="enable_{html.escape(ext.name)}" type="checkbox" {'checked="checked"' if ext.enabled else ''} onchange="toggle_extension(event)" />{html.escape(ext.name)}</label></td>
-                <td>{remote}</td>
-                <td>{ext.branch}</td>
-                <td>{version_link}</td>
-                <td>{datetime.fromtimestamp(ext.commit_date) if ext.commit_date else ""}</td>
-                <td{' class="extension_status"' if ext.remote is not None else ''}>{ext_status}</td>
-            </tr>
-    """
+        except Exception as e:
+            print(f"Error accessing repository for extension {ext.name}: {e}")
 
     code += """
         </tbody>

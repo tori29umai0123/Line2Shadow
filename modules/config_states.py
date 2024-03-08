@@ -7,7 +7,7 @@ import json
 import tqdm
 
 from datetime import datetime
-import git
+import pygit2
 
 from modules import shared, extensions, errors
 from modules.paths_internal import script_path, config_states_dir
@@ -49,8 +49,8 @@ def get_webui_config():
     webui_repo = None
 
     try:
-        if os.path.exists(os.path.join(script_path, ".git")):
-            webui_repo = git.Repo(script_path)
+        # pygit2を使用してリポジトリを読み込む
+        webui_repo = pygit2.Repository(script_path)
     except Exception:
         errors.report(f"Error reading webui git info from {script_path}", exc_info=True)
 
@@ -58,14 +58,14 @@ def get_webui_config():
     webui_commit_hash = None
     webui_commit_date = None
     webui_branch = None
-    if webui_repo and not webui_repo.bare:
+    if webui_repo:
         try:
-            webui_remote = next(webui_repo.remote().urls, None)
-            head = webui_repo.head.commit
-            webui_commit_date = webui_repo.head.commit.committed_date
-            webui_commit_hash = head.hexsha
-            webui_branch = webui_repo.active_branch.name
-
+            # pygit2を使用してリモートURL、コミットハッシュ、日付、ブランチ名を取得
+            webui_remote = list(webui_repo.remotes['origin'].url)[0]
+            head_commit = webui_repo.head.peel(pygit2.Commit)
+            webui_commit_date = head_commit.commit_time
+            webui_commit_hash = head_commit.hex
+            webui_branch = webui_repo.head.shorthand
         except Exception:
             webui_remote = None
 
@@ -129,18 +129,17 @@ def restore_webui_config(config):
     webui_repo = None
 
     try:
-        if os.path.exists(os.path.join(script_path, ".git")):
-            webui_repo = git.Repo(script_path)
+        webui_repo = pygit2.Repository(script_path)
     except Exception:
         errors.report(f"Error reading webui git info from {script_path}", exc_info=True)
         return
 
     try:
-        webui_repo.git.fetch(all=True)
-        webui_repo.git.reset(webui_commit_hash, hard=True)
+        # pygit2を使用して指定されたコミットにリセット
+        webui_repo.reset(webui_commit_hash, pygit2.GIT_RESET_HARD)
         print(f"* Restored webui to commit {webui_commit_hash}.")
     except Exception:
-        errors.report(f"Error restoring webui to commit{webui_commit_hash}")
+        errors.report(f"Error restoring webui to commit {webui_commit_hash}")
 
 
 def restore_extension_config(config):
