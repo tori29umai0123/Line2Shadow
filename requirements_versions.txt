@@ -30,7 +30,7 @@ transformers==4.30.2
 httpx==0.24.1
 basicsr==1.4.2
 diffusers==0.25.0
-kinterdnd2==0.3.0
+tkinterdnd2==0.3.0
 tensorflow==2.15.0
-pyinstaller
-pygit2
+pyinstaller==6.4.0
+pygit2==1.14.1
